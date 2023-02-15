@@ -8,6 +8,7 @@ import SteamCommunity from 'steamcommunity';
 import TradeOfferManager from 'steam-tradeoffer-manager';
 import { sendNotification } from './notifications.js';
 import { retry } from './utils.js';
+import util from 'util';
 import 'dotenv/config';
 
 interface SentTradeOffers {
@@ -58,46 +59,26 @@ community.on('sessionExpired', function(err: any) {
     client.webLogOn();
 });
 
-export function sendOffer(offer: TradeOfferManager.TradeOffer) {
-    return new Promise((resolve, reject) => {
-        offer.send((err: any, status: string) => {
-            if (err) {
-                reject(err);
-                return;
-            }
+export async function sendOffer(offer: TradeOfferManager.TradeOffer) {
+    let sendTradeOfferPromiseFn = util.promisify(offer.send.bind(offer));
 
-            sentTradeOffers[offer.id] = offer;
+    let status = await retry(() => sendTradeOfferPromiseFn(), 3, 5000);
 
-            sendNotification(`Sent offer. Status: ${status}.`);
+    sentTradeOffers[offer.id] = offer;
 
-            if (status === 'pending') {
-                sendNotification(`Offer #${offer.id} needs confirmation.`);
+    sendNotification(`Sent offer. Status: ${status}.`);
 
-                retry(() => {
-                    return new Promise((resolve, reject) => {
-                        community.acceptConfirmationForObject(process.env.STEAM_IDENTITY_SECRET, offer.id, function(err: any) {
-                            if (err) {
-                                reject(err);
-                                return;
-                            }
+    if (status === 'pending') {
+        sendNotification(`Offer #${offer.id} needs confirmation.`);
 
-                            resolve(offer);
-                        });
-                    });
-                }, 3, 5000)
-                .then(() => {
-                    sentTradeOffers[offer.id] = offer;
-    
-                    sendNotification(`Offer ${offer.id} confirmed`);
+        let confirmPromiseFn = util.promisify(community.acceptConfirmationForObject.bind(community));
 
-                    resolve(offer);
-                })
-                .catch((err: any) => {
-                    reject(err);
-                });
-            }
-        });
-    });
+        await retry(() => confirmPromiseFn(process.env.STEAM_IDENTITY_SECRET, offer.id), 3, 5000);
+
+        sentTradeOffers[offer.id] = offer;
+
+        sendNotification(`Offer ${offer.id} confirmed`);
+    }
 }
 
 export function getOffer(offerId: string): Promise<TradeOfferManager.TradeOffer|null> {
