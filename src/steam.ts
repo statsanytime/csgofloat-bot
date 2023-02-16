@@ -154,11 +154,13 @@ async function login() {
         community.setCookies(cookies);
     });
 
-    community.on('sessionExpired', function(err: any) {
+    community.on('sessionExpired', async function(err: any) {
         sendNotification('Steam session expired');
         console.error(err);
-    
-        client.webLogOn();
+
+        client.logOn({
+            refreshToken: await getRefreshToken(),
+        });
     });
 }
 
