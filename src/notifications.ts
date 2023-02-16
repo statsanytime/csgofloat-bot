@@ -7,6 +7,9 @@ export async function sendNotification(content: string) {
             body: JSON.stringify({
                 content,
             }),
+            headers: {
+                'Content-Type': 'application/json',
+            },
             method: 'POST',
         });
     } catch (err) {
