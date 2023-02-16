@@ -2,7 +2,7 @@ import TradeOfferManager from 'steam-tradeoffer-manager';
 import { client, manager, sendOffer, cancelOffer, login as loginSteam } from './steam.js';
 import { sendNotification } from './notifications.js';
 import { retry } from './utils.js';
-import axios from 'axios';
+import axios, { AxiosProxyConfig } from 'axios';
 import 'dotenv/config';
 
 interface TradeToSendBuyer {
@@ -88,6 +88,22 @@ const axiosInstance = axios.create({
         Authorization: process.env.CSGOFLOAT_API_KEY,
     },
 });
+
+if (process.env.PROXY_HOST) {
+    let proxy: AxiosProxyConfig = {
+        host: process.env.PROXY_HOST,
+        port: process.env.PROXY_PORT ? Number(process.env.PROXY_PORT) : 80,
+    };
+
+    if (process.env.PROXY_USERNAME && process.env.PROXY_PASSWORD) {
+        proxy.auth = {
+            username: process.env.PROXY_USERNAME,
+            password: process.env.PROXY_PASSWORD,
+        };
+    }
+
+    axiosInstance.defaults.proxy = proxy;
+}
 
 async function acceptTrade(trade: TradeToSend) {
     return axiosInstance.post(`/trades/${trade.id}/accept`)
