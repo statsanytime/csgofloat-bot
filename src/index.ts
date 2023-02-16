@@ -93,6 +93,7 @@ if (process.env.PROXY_HOST) {
     let proxy: AxiosProxyConfig = {
         host: process.env.PROXY_HOST,
         port: process.env.PROXY_PORT ? Number(process.env.PROXY_PORT) : 80,
+        protocol: process.env.PROXY_PROTOCOL ?? 'http',
     };
 
     if (process.env.PROXY_USERNAME && process.env.PROXY_PASSWORD) {
