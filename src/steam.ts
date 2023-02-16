@@ -19,17 +19,18 @@ const sentTradeOffers: SentTradeOffers = {};
 
 let client = new SteamUser();
 
-let manager = new TradeOfferManager({
-	"steam": client,
-	"language": "en"
-});
-
 let community = new SteamCommunity();
 
+let manager = new TradeOfferManager({
+	steam: client,
+    community,
+	language: "en"
+});
+
 let logOnOptions = {
-    "accountName": process.env.STEAM_USERNAME,
-    "password": process.env.STEAM_PASSWORD,
-    "twoFactorCode": SteamTotp.getAuthCode(process.env.STEAM_SHARED_SECRET)
+    accountName: process.env.STEAM_USERNAME,
+    password: process.env.STEAM_PASSWORD,
+    twoFactorCode: SteamTotp.getAuthCode(process.env.STEAM_SHARED_SECRET)
 };
 
 client.logOn(logOnOptions);
@@ -39,6 +40,8 @@ client.on('loggedOn', () => {
 });
 
 client.on('webSession', (sessionID: any, cookies: any) => {
+    sendNotification('Got web session');
+
     manager.setCookies(cookies, (err: any) => {
         if (err) {
             sendNotification('Unable to set cookies for trade offer manager');
