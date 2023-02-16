@@ -1,5 +1,5 @@
 import TradeOfferManager from 'steam-tradeoffer-manager';
-import { client, manager, sendOffer, cancelOffer } from './steam.js';
+import { client, manager, sendOffer, cancelOffer, login as loginSteam } from './steam.js';
 import { sendNotification } from './notifications.js';
 import { retry } from './utils.js';
 import axios from 'axios';
@@ -187,6 +187,8 @@ function checkForTradesToSend() {
         console.error(err);
     });
 };
+
+loginSteam();
 
 // Wait for the client to log on to Steam before checking for trades to send
 client.on('webSession', () => {

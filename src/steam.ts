@@ -6,6 +6,8 @@ import SteamTotp from 'steam-totp';
 import SteamCommunity from 'steamcommunity';
 // @ts-ignore
 import TradeOfferManager from 'steam-tradeoffer-manager';
+import { EAuthSessionGuardType, EAuthTokenPlatformType, LoginSession } from 'steam-session';
+import { readFileSync, writeFileSync } from 'fs';
 import { sendNotification } from './notifications.js';
 import { retry } from './utils.js';
 import util from 'util';
@@ -15,52 +17,150 @@ interface SentTradeOffers {
     [key: string]: TradeOfferManager.TradeOffer,
 }
 
+interface Secrets {
+    refresh_token: string|null,
+}
+
 const sentTradeOffers: SentTradeOffers = {};
 
-let client = new SteamUser();
+const client = new SteamUser();
 
-let community = new SteamCommunity();
+const community = new SteamCommunity();
 
-let manager = new TradeOfferManager({
+const manager = new TradeOfferManager({
 	steam: client,
     community,
 	language: "en"
 });
 
-let logOnOptions = {
-    accountName: process.env.STEAM_USERNAME,
-    password: process.env.STEAM_PASSWORD,
-    twoFactorCode: SteamTotp.getAuthCode(process.env.STEAM_SHARED_SECRET)
-};
+let secrets: Secrets = getSecrets();
 
-client.logOn(logOnOptions);
+function getSecretsFromFile(): Secrets|null {
+    try {
+        let secretsFile = JSON.parse(readFileSync('secrets.json', 'utf8'));
 
-client.on('loggedOn', () => {
-    sendNotification('Logged into Steam');
-});
+        return secretsFile;
+    } catch (err) {
+        return null;
+    }
+}
 
-client.on('webSession', (sessionID: any, cookies: any) => {
-    sendNotification('Got web session');
+function getSecrets(): Secrets {
+    if (process.env.CACHE_SECRETS === 'true') {
+        sendNotification('Getting secrets from cache');
 
-    manager.setCookies(cookies, (err: any) => {
-        if (err) {
-            sendNotification('Unable to set cookies for trade offer manager');
-            console.error(err);
-            process.exit(1);
+        let secretsFile = getSecretsFromFile();
+
+        if (secretsFile) {
+            return secretsFile;
         }
+    }
 
-        sendNotification('Trade offer manager cookies set');
+    return {
+        refresh_token: null,
+    };
+}
+
+async function getSession(): Promise<LoginSession> {
+    let session = new LoginSession(EAuthTokenPlatformType.SteamClient);
+
+    let startResult = await session.startWithCredentials({
+        accountName: process.env.STEAM_USERNAME,
+        password: process.env.STEAM_PASSWORD,
     });
 
-    community.setCookies(cookies);
-});
+    sendNotification('Steam session started');
 
-community.on('sessionExpired', function(err: any) {
-    sendNotification('Steam session expired');
-    console.error(err);
+	if (startResult.actionRequired) {
+        if (!startResult.validActions.some(action => action.type === EAuthSessionGuardType.DeviceCode)) {
+            throw new Error('Device code is not a valid action for signing in.');
+        }
 
-    client.webLogOn();
-});
+        let code = SteamTotp.getAuthCode(process.env.STEAM_SHARED_SECRET);
+
+        await session.submitSteamGuardCode(code);
+
+        sendNotification('Steam guard code submitted and session was successfully created.');
+    }
+
+    return session;
+}
+
+function updateSecrets(attributes: { [key: string]: any }) {
+    secrets = {
+        ...secrets,
+        ...attributes,
+    };
+
+    writeFileSync('secrets.json', JSON.stringify(secrets));
+
+    return secrets;
+}
+
+async function getRefreshToken(): Promise<string> {
+    if (secrets.refresh_token) {
+        return secrets.refresh_token;
+    }
+
+    return new Promise(async (resolve, reject) => {
+        let session = await getSession();
+        
+        session.on('authenticated', async () => {
+            sendNotification('Steam session authenticated');
+
+            let updatedSecrets = updateSecrets({
+                refresh_token: session.refreshToken,
+            });
+        
+            return resolve(updatedSecrets.refresh_token);
+        });
+
+        session.on('timeout', () => {
+            sendNotification('Steam session timed out');
+
+            reject('Steam session timed out');
+        });
+    
+        session.on('error', (err: any) => {
+            sendNotification(`Steam session error: ${err.message}`);
+
+            reject(err);
+        });
+    });
+}
+
+async function login() {
+    client.logOn({
+        refreshToken: await getRefreshToken(),
+    });
+
+    client.on('loggedOn', () => {
+        sendNotification('Logged into Steam');
+    });
+    
+    client.on('webSession', (sessionID: any, cookies: any) => {
+        sendNotification('Got web session');
+    
+        manager.setCookies(cookies, (err: any) => {
+            if (err) {
+                sendNotification('Unable to set cookies for trade offer manager');
+                console.error(err);
+                process.exit(1);
+            }
+    
+            sendNotification('Trade offer manager cookies set');
+        });
+    
+        community.setCookies(cookies);
+    });
+
+    community.on('sessionExpired', function(err: any) {
+        sendNotification('Steam session expired');
+        console.error(err);
+    
+        client.webLogOn();
+    });
+}
 
 export async function sendOffer(offer: TradeOfferManager.TradeOffer) {
     let sendTradeOfferPromiseFn = util.promisify(offer.send.bind(offer));
@@ -131,4 +231,5 @@ export {
     manager,
     community,
     client,
+    login,
 };

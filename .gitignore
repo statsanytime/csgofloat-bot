@@ -1,5 +1,6 @@
 # API keys and secrets
 .env
+secrets.json
 
 # Dependency directory
 node_modules
