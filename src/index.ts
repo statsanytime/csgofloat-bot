@@ -2,7 +2,8 @@ import TradeOfferManager from 'steam-tradeoffer-manager';
 import { client, manager, sendOffer, cancelOffer, login as loginSteam } from './steam.js';
 import { sendNotification } from './notifications.js';
 import { retry } from './utils.js';
-import axios, { AxiosProxyConfig } from 'axios';
+import HttpsProxyAgent, { HttpsProxyAgentOptions } from 'https-proxy-agent';
+import fetch, { RequestInit, RequestInfo } from 'node-fetch';
 import 'dotenv/config';
 
 interface TradeToSendBuyer {
@@ -20,6 +21,14 @@ interface TradeToSendBuyer {
     };
     steam_id: string;
     username: string;
+};
+
+interface FloatMe {
+    pending_offers: number;
+    trades_to_send: TradeToSend[];
+    user: {
+        [key: string]: any;
+    };
 };
 
 interface TradeToSend {
@@ -82,32 +91,36 @@ interface SentOffer {
 
 let sentOffers: SentOffer[] = [];
 
-const axiosInstance = axios.create({
-    baseURL: 'https://csgofloat.com/api/v1',
-    headers: {
-        Authorization: process.env.CSGOFLOAT_API_KEY,
-    },
-});
-
-if (process.env.PROXY_HOST) {
-    let proxy: AxiosProxyConfig = {
-        host: process.env.PROXY_HOST,
-        port: process.env.PROXY_PORT ? Number(process.env.PROXY_PORT) : 80,
-        protocol: process.env.PROXY_PROTOCOL ?? 'http',
-    };
-
-    if (process.env.PROXY_USERNAME && process.env.PROXY_PASSWORD) {
-        proxy.auth = {
-            username: process.env.PROXY_USERNAME,
-            password: process.env.PROXY_PASSWORD,
+function fetchFloat(url: RequestInfo, options: RequestInit = {}) {
+    if (process.env.PROXY_HOST) {
+        const proxyOptions: HttpsProxyAgentOptions = {
+            host: process.env.PROXY_HOST,
+            port: process.env.PROXY_PORT ? parseInt(process.env.PROXY_PORT) : 443,
+            protocol: process.env.PROXY_PROTOCOL || 'https:',
         };
+
+        if (process.env.PROXY_USERNAME && process.env.PROXY_PASSWORD) {
+            proxyOptions.auth = `${process.env.PROXY_USERNAME}:${process.env.PROXY_PASSWORD}`;
+        }
+
+        // @ts-ignore
+        const proxyAgent = new HttpsProxyAgent(proxyOptions);
+
+        options.agent = proxyAgent;
     }
 
-    axiosInstance.defaults.proxy = proxy;
+    options.headers = {
+        ...options.headers,
+        Authorization: process.env.CSGOFLOAT_API_KEY,
+    };
+
+    return fetch(`https://csgofloat.com/api/v1${url}`, options);
 }
 
 async function acceptTrade(trade: TradeToSend) {
-    return axiosInstance.post(`/trades/${trade.id}/accept`)
+    return fetchFloat(`/trades/${trade.id}/accept`, {
+        method: 'POST',
+    });
 }
 
 async function handleOfferAccepted(offer: TradeOfferManager.TradeOffer) {
@@ -168,9 +181,11 @@ async function handleTradeToSend(trade: TradeToSend) {
 }
 
 function checkForTradesToSend() {
-    axiosInstance.get(`/me`)
-    .then(res => {
-        let tradesToSend: TradeToSend[] = res.data.trades_to_send.filter((trade: TradeToSend) => !sentOffers.some((data: SentOffer) => data.trade.id === trade.id));
+    fetchFloat('/me')
+    .then(async res => {
+        let data = await res.json() as FloatMe;
+
+        let tradesToSend: TradeToSend[] = data.trades_to_send.filter((trade: TradeToSend) => !sentOffers.some((data: SentOffer) => data.trade.id === trade.id));
         let tradesToSendWithGracePeriod = tradesToSend.filter((trade: TradeToSend) => trade.grace_period_start);
 
         tradesToSend.forEach(handleTradeToSend);
