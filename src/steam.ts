@@ -133,6 +133,8 @@ export async function sendOffer(offer: TradeOfferManager.TradeOffer) {
 
         sendNotification(`Offer ${offer.id} confirmed`);
     }
+
+    return offer;
 }
 
 export function getOffer(offerId: string): Promise<TradeOfferManager.TradeOffer|null> {
