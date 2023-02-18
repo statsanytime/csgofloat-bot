@@ -7,7 +7,6 @@ import SteamCommunity from 'steamcommunity';
 // @ts-ignore
 import TradeOfferManager from 'steam-tradeoffer-manager';
 import { EAuthSessionGuardType, EAuthTokenPlatformType, LoginSession } from 'steam-session';
-import { readFileSync, writeFileSync } from 'fs';
 import { sendNotification } from './notifications.js';
 import { retry } from './utils.js';
 import util from 'util';
@@ -17,49 +16,17 @@ interface SentTradeOffers {
     [key: string]: TradeOfferManager.TradeOffer,
 }
 
-interface Secrets {
-    refresh_token: string|null,
-}
-
 const sentTradeOffers: SentTradeOffers = {};
 
-const client = new SteamUser();
+const client: SteamUser = new SteamUser();
 
-const community = new SteamCommunity();
+const community: SteamCommunity = new SteamCommunity();
 
-const manager = new TradeOfferManager({
+const manager: TradeOfferManager = new TradeOfferManager({
 	steam: client,
     community,
 	language: "en"
 });
-
-let secrets: Secrets = getSecrets();
-
-function getSecretsFromFile(): Secrets|null {
-    try {
-        let secretsFile = JSON.parse(readFileSync('secrets.json', 'utf8'));
-
-        return secretsFile;
-    } catch (err) {
-        return null;
-    }
-}
-
-function getSecrets(): Secrets {
-    if (process.env.CACHE_SECRETS === 'true') {
-        sendNotification('Getting secrets from cache');
-
-        let secretsFile = getSecretsFromFile();
-
-        if (secretsFile) {
-            return secretsFile;
-        }
-    }
-
-    return {
-        refresh_token: null,
-    };
-}
 
 async function getSession(): Promise<LoginSession> {
     let session = new LoginSession(EAuthTokenPlatformType.SteamClient);
@@ -86,33 +53,12 @@ async function getSession(): Promise<LoginSession> {
     return session;
 }
 
-function updateSecrets(attributes: { [key: string]: any }) {
-    secrets = {
-        ...secrets,
-        ...attributes,
-    };
-
-    writeFileSync('secrets.json', JSON.stringify(secrets));
-
-    return secrets;
-}
-
-async function getRefreshToken(): Promise<string> {
-    if (secrets.refresh_token) {
-        return secrets.refresh_token;
-    }
-
+async function authenticateSession(session: LoginSession): Promise<LoginSession> {
     return new Promise(async (resolve, reject) => {
-        let session = await getSession();
-        
         session.on('authenticated', async () => {
             sendNotification('Steam session authenticated');
-
-            let updatedSecrets = updateSecrets({
-                refresh_token: session.refreshToken,
-            });
         
-            return resolve(updatedSecrets.refresh_token);
+            return resolve(session);
         });
 
         session.on('timeout', () => {
@@ -129,38 +75,41 @@ async function getRefreshToken(): Promise<string> {
     });
 }
 
+async function refreshWebCookies(session: LoginSession) {
+    let webCookies = await session.getWebCookies();
+
+    let managerSetCookiesFn = util.promisify(manager.setCookies.bind(manager));
+
+    try {
+        await managerSetCookiesFn(webCookies);
+        sendNotification('Web cookies set');
+    } catch (err) {
+        sendNotification('Unable to set cookies for trade offer manager');
+        console.error(err);
+        process.exit(1);
+    }
+}
+
 async function login() {
+    let session = await getSession();
+
+    await authenticateSession(session);
+
     client.logOn({
-        refreshToken: await getRefreshToken(),
+        refreshToken: session.refreshToken,
     });
 
-    client.on('loggedOn', () => {
+    client.on('loggedOn', async () => {
         sendNotification('Logged into Steam');
-    });
-    
-    client.on('webSession', (sessionID: any, cookies: any) => {
-        sendNotification('Got web session');
-    
-        manager.setCookies(cookies, (err: any) => {
-            if (err) {
-                sendNotification('Unable to set cookies for trade offer manager');
-                console.error(err);
-                process.exit(1);
-            }
-    
-            sendNotification('Trade offer manager cookies set');
-        });
-    
-        community.setCookies(cookies);
+
+        await refreshWebCookies(session);
     });
 
     community.on('sessionExpired', async function(err: any) {
         sendNotification('Steam session expired');
         console.error(err);
 
-        client.logOn({
-            refreshToken: await getRefreshToken(),
-        });
+        await refreshWebCookies(session);
     });
 }
 
