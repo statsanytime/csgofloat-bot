@@ -3,7 +3,7 @@ import { client, manager, sendOffer, cancelOffer, login as loginSteam } from './
 import { sendNotification } from './notifications.js';
 import { retry } from './utils.js';
 import HttpsProxyAgent, { HttpsProxyAgentOptions } from 'https-proxy-agent';
-import fetch, { RequestInit, RequestInfo } from 'node-fetch';
+import fetch, { RequestInit, RequestInfo, Response } from 'node-fetch';
 import 'dotenv/config';
 
 interface TradeToSendBuyer {
@@ -91,7 +91,7 @@ interface SentOffer {
 
 let sentOffers: SentOffer[] = [];
 
-function fetchFloat(url: RequestInfo, options: RequestInit = {}) {
+function fetchFloat(url: RequestInfo, options: RequestInit = {}): Promise<Response> {
     if (process.env.PROXY_HOST) {
         const proxyOptions: HttpsProxyAgentOptions = {
             host: process.env.PROXY_HOST,
@@ -114,7 +114,19 @@ function fetchFloat(url: RequestInfo, options: RequestInit = {}) {
         Authorization: process.env.CSGOFLOAT_API_KEY,
     };
 
-    return fetch(`https://csgofloat.com/api/v1${url}`, options);
+    return new Promise((resolve, reject) => {
+        fetch(`https://csgofloat.com/api/v1${url}`, options)
+        .then(res => {
+            if (!res.ok) {
+                return reject(new Error(`Request failed with status ${res.status}`));
+            }
+
+            return resolve(res);
+        })
+        .catch(err => {
+            return reject(err);
+        });
+    });
 }
 
 async function acceptTrade(trade: TradeToSend) {
