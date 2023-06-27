@@ -16,10 +16,10 @@
         "dotenv": "^16.0.3",
         "https-proxy-agent": "^5.0.1",
         "node-fetch": "^3.3.0",
-        "steam-session": "^1.2.3",
+        "steam-session": "^1.2.4",
         "steam-totp": "^2.1.2",
         "steam-tradeoffer-manager": "^2.10.5",
         "steam-user": "^4.28.7",
-        "steamcommunity": "^3.46.0"
+        "steamcommunity": "^3.46.1"
     }
 }
